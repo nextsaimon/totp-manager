@@ -12,7 +12,7 @@ This application is built with a security-first approach: your sensitive TOTP se
 -   🔐 **Server-Side Security**: TOTP secrets are stored securely in your MongoDB and are never exposed to the browser.
 -   🔑 **Password Protected**: The entire application is locked behind a single master password.
 -   🛡️ **Brute-Force Protection**: Automatically locks out an IP address after multiple failed login attempts.
--   📷 **QR Code Support**: Add new secrets easily by uploading or pasting a QR code image from your clipboard.
+-   📷 **QR Code Support**: Add new secrets easily by `scaning` or `uploading` or `pasting` a QR code image from your clipboard.
 -   ✍️ **Notes Management**: Add, edit, and delete notes for each of your secrets with a simple inline editor.
 -   🖱️ **One-Click Copy**: Generate and copy TOTP codes to your clipboard with a single click.
 -   🎨 **Theme Support**: Includes automatic Light/Dark mode based on your system preference, with a manual theme toggler.
@@ -104,7 +104,7 @@ The application uses a set of secure API endpoints that require an `X-App-Passwo
 The easiest way to deploy this application is on a platform like [Vercel](https://vercel.com/) or [Netlify](https://www.netlify.com/).
 
 1.  Push your code to a GitHub repository.
-2.  Import the repository into your Vercel/Netlify account.
+2.  Import the repository into your Vercel/Netlify account. You can host mongodb from vercel.
 3.  Add the same environment variables (`MONGODB_URI`, `APP_PASSWORD`, etc.) in the project settings on the hosting platform.
 4.  Deploy! The platform will handle the build process and provide you with a live, HTTPS-enabled URL.
 
