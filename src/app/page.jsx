@@ -1,6 +1,7 @@
 "use client";
 import { useState, useRef, useEffect } from "react";
 import jsQR from "jsqr";
+import * as OTPAuth from "otpauth";
 import { toast } from "sonner";
 import {
   Eye,
@@ -12,6 +13,7 @@ import {
   KeyRound,
   Camera,
   Zap,
+  Sparkles,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,12 +40,14 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ThemeToggle } from "@/components/theme-toggle";
+import { Progress } from "@/components/ui/progress";
 
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -64,6 +68,13 @@ export default function Home() {
   const [cameraDevices, setCameraDevices] = useState([]);
   const [selectedDeviceId, setSelectedDeviceId] = useState("");
 
+  const [isTempGeneratorOpen, setIsTempGeneratorOpen] = useState(false);
+  const [tempSecret, setTempSecret] = useState("");
+  const [tempOtp, setTempOtp] = useState(null);
+  const [tempTimeLeft, setTempTimeLeft] = useState(0);
+  const [tempError, setTempError] = useState(null);
+  const tempIntervalRef = useRef(null);
+
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
@@ -81,17 +92,58 @@ export default function Home() {
         "devicechange",
         enumerateCameras
       );
+      clearInterval(tempIntervalRef.current);
     };
   }, []);
 
   useEffect(() => {
-    if (isCameraOpen) {
-      startCamera();
-    } else {
-      stopCamera();
-    }
+    if (isCameraOpen) startCamera();
+    else stopCamera();
     return () => stopCamera();
   }, [isCameraOpen, selectedDeviceId]);
+
+  useEffect(() => {
+    if (!isTempGeneratorOpen) {
+      clearInterval(tempIntervalRef.current);
+      setTempSecret("");
+      setTempOtp(null);
+      setTempError(null);
+      setTempTimeLeft(0);
+    }
+  }, [isTempGeneratorOpen]);
+
+  const handleGenerateTempCode = () => {
+    clearInterval(tempIntervalRef.current);
+    if (!tempSecret.trim()) {
+      setTempError("Secret cannot be empty.");
+      setTempOtp(null);
+      return;
+    }
+    try {
+      const totp = new OTPAuth.TOTP({
+        secret: OTPAuth.Secret.fromBase32(tempSecret.trim().toUpperCase()),
+      });
+      const updateToken = () => {
+        const token = totp.generate();
+        const timeLeft = 30 - (Math.floor(Date.now() / 1000) % 30);
+        setTempOtp(token);
+        setTempTimeLeft(timeLeft);
+        setTempError(null);
+      };
+      updateToken();
+      tempIntervalRef.current = setInterval(updateToken, 1000);
+    } catch (e) {
+      setTempError("Invalid Base32 secret key provided.");
+      setTempOtp(null);
+      setTempTimeLeft(0);
+    }
+  };
+
+  const copyTempOtp = () => {
+    if (!tempOtp) return;
+    navigator.clipboard.writeText(tempOtp);
+    toast.success("Temporary code copied to clipboard!");
+  };
 
   async function enumerateCameras() {
     try {
@@ -106,7 +158,6 @@ export default function Home() {
       console.error("Could not enumerate cameras:", e);
     }
   }
-
   async function startCamera() {
     try {
       stopCamera();
@@ -131,12 +182,11 @@ export default function Home() {
     } catch (err) {
       setCameraStatus(`error: ${err.message}`);
       toast.error("Camera Error", {
-        description: "Could not start the camera. Please check permissions.",
+        description: "Could not start camera. Check permissions.",
       });
       setIsCameraOpen(false);
     }
   }
-
   function stopCamera() {
     scanningRef.current = false;
     setTorchOn(false);
@@ -146,26 +196,21 @@ export default function Home() {
     }
     setCameraStatus("idle");
   }
-
   function scanLoop() {
     if (!scanningRef.current || !videoRef.current || !canvasRef.current) return;
-
     const video = videoRef.current;
     const canvas = canvasRef.current;
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
-
     if (video.readyState === video.HAVE_ENOUGH_DATA) {
       const w = video.videoWidth;
       const h = video.videoHeight;
       if (canvas.width !== w) canvas.width = w;
       if (canvas.height !== h) canvas.height = h;
-
       ctx.drawImage(video, 0, 0, w, h);
       const imageData = ctx.getImageData(0, 0, w, h);
       const code = jsQR(imageData.data, w, h, {
         inversionAttempts: "dontInvert",
       });
-
       if (code && code.data) {
         scanningRef.current = false;
         stopCamera();
@@ -177,14 +222,12 @@ export default function Home() {
       requestAnimationFrame(scanLoop);
     }
   }
-
   async function toggleTorch() {
     const track = trackRef.current;
     if (!track) return toast.error("Camera not active");
     const capabilities = track.getCapabilities?.();
     if (!capabilities || !capabilities.torch)
-      return toast.error("Flashlight not supported by this camera.");
-
+      return toast.error("Flashlight not supported.");
     const newTorchState = !torchOn;
     try {
       await track.applyConstraints({ advanced: [{ torch: newTorchState }] });
@@ -193,7 +236,6 @@ export default function Home() {
       toast.error("Failed to toggle flashlight.");
     }
   }
-
   const getAuthHeaders = () => ({
     "Content-Type": "application/json",
     "X-App-Password": passwordInput,
@@ -252,7 +294,7 @@ export default function Home() {
   const handleAddSecretFromFile = async () => {
     if (!preview)
       return toast.error("No Image", {
-        description: "Please upload or paste an image first.",
+        description: "Please upload or paste an image.",
       });
     try {
       const otpUrl = await scanQrCode(preview);
@@ -269,7 +311,7 @@ export default function Home() {
         headers: getAuthHeaders(),
         body: JSON.stringify({ id: deleteTarget._id }),
       });
-      if (!res.ok) throw new Error("Failed to delete the secret.");
+      if (!res.ok) throw new Error("Failed to delete secret.");
       toast.success("Deleted", {
         description: `Secret for "${deleteTarget.label}" removed.`,
       });
@@ -359,7 +401,7 @@ export default function Home() {
         const imageData = ctx.getImageData(0, 0, img.width, img.height);
         const code = jsQR(imageData.data, imageData.width, imageData.height);
         if (code && code.data) resolve(code.data);
-        else reject("No QR code found in image.");
+        else reject("No QR code found.");
       };
       img.onerror = () => reject("Failed to load image.");
     });
@@ -449,7 +491,16 @@ export default function Home() {
       <div className="w-full max-w-6xl">
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-3xl font-bold">TOTP Secret Manager</h1>
-          <ThemeToggle />
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => setIsTempGeneratorOpen(true)}
+            >
+              <Sparkles className="h-4 w-4" />
+            </Button>
+            <ThemeToggle />
+          </div>
         </div>
         <div className="grid lg:grid-cols-3 gap-8">
           <div className="lg:col-span-1">
@@ -693,6 +744,61 @@ export default function Home() {
           <p className="text-xs text-muted-foreground text-center">
             Status: {cameraStatus}
           </p>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={isTempGeneratorOpen} onOpenChange={setIsTempGeneratorOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Temporary Code Generator</DialogTitle>
+            <DialogDescription>
+              Generate a one-time code without saving the secret.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            <div>
+              <Label htmlFor="temp-secret">TOTP Secret Key (Base32)</Label>
+              <Textarea
+                id="temp-secret"
+                value={tempSecret}
+                onChange={(e) => setTempSecret(e.target.value)}
+                placeholder="Paste your Base32 secret here"
+                className="mt-2"
+              />
+            </div>
+            {(tempOtp || tempError) && (
+              <>
+                {tempError && (
+                  <p className="text-sm text-destructive">{tempError}</p>
+                )}
+                {tempOtp && (
+                  <div className="w-full space-y-2">
+                    <div className="bg-muted w-full p-3 rounded-lg flex justify-between items-center">
+                      <span className="text-2xl font-mono tracking-wider">
+                        {tempOtp}
+                      </span>
+                      <Button variant="ghost" size="icon" onClick={copyTempOtp}>
+                        <Copy className="h-5 w-5" />
+                      </Button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Progress
+                        value={(tempTimeLeft / 30) * 100}
+                        className="h-2"
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {tempTimeLeft}s
+                      </span>
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+          <DialogFooter>
+            <Button onClick={handleGenerateTempCode} className="w-full">
+              Generate Code
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </main>

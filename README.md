@@ -13,6 +13,7 @@ This application is built with a security-first approach: your sensitive TOTP se
 -   🔑 **Password Protected**: The entire application is locked behind a single master password.
 -   🛡️ **Brute-Force Protection**: Automatically locks out an IP address after multiple failed login attempts.
 -   📷 **QR Code Support**: Add new secrets easily by `scaning` or `uploading` or `pasting` a QR code image from your clipboard.
+-   ✨ **Temporary Code Generator**: Quickly generate a one-time code from a secret key without saving it to the database.
 -   ✍️ **Notes Management**: Add, edit, and delete notes for each of your secrets with a simple inline editor.
 -   🖱️ **One-Click Copy**: Generate and copy TOTP codes to your clipboard with a single click.
 -   🎨 **Theme Support**: Includes automatic Light/Dark mode based on your system preference, with a manual theme toggler.
