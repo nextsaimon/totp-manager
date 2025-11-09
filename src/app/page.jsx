@@ -812,7 +812,7 @@ export default function Home() {
               Point your camera at a QR code.
             </DialogDescription>
           </DialogHeader>
-          <div className="relative w-full aspect-square bg-muted rounded-lg overflow-hidden">
+          <div className="relative w-full aspect-square bg-muted rounded-lg overflow-hidden flex items-center justify-center">
             <video
               ref={videoRef}
               className="w-full h-full object-cover"
