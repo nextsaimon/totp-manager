@@ -81,21 +81,45 @@ export default function Home() {
 
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const processCanvasRef = useRef(null);
   const streamRef = useRef(null);
   const trackRef = useRef(null);
   const scanningRef = useRef(false);
+  const lastProcessRef = useRef(0);
   const pasteRef = useRef(null);
   const fileInputRef = useRef(null);
+  const SCAN_INTERVAL_MS = 66; // ~15 FPS processing
 
   useEffect(() => {
-    enumerateCameras();
-    navigator.mediaDevices.addEventListener("devicechange", enumerateCameras);
+    // Only attempt to enumerate devices and attach listeners when running in
+    // a browser environment that exposes navigator.mediaDevices. This avoids
+    // errors during SSR or in environments without camera support.
+    if (
+      typeof navigator !== "undefined" &&
+      navigator.mediaDevices &&
+      typeof navigator.mediaDevices.enumerateDevices === "function"
+    ) {
+      enumerateCameras();
+      try {
+        navigator.mediaDevices.addEventListener(
+          "devicechange",
+          enumerateCameras
+        );
+      } catch (e) {
+        // some environments may not support addEventListener on mediaDevices
+      }
+    }
+
     return () => {
       stopCamera();
-      navigator.mediaDevices.removeEventListener(
-        "devicechange",
-        enumerateCameras
-      );
+      try {
+        navigator?.mediaDevices?.removeEventListener?.(
+          "devicechange",
+          enumerateCameras
+        );
+      } catch (e) {
+        // ignore
+      }
       clearInterval(tempIntervalRef.current);
       clearInterval(otpIntervalRef.current);
     };
@@ -188,6 +212,15 @@ export default function Home() {
 
   async function enumerateCameras() {
     try {
+      if (
+        typeof navigator === "undefined" ||
+        !navigator.mediaDevices ||
+        typeof navigator.mediaDevices.enumerateDevices !== "function"
+      ) {
+        // Not running in a browser or mediaDevices not available.
+        setCameraDevices([]);
+        return;
+      }
       const devices = await navigator.mediaDevices.enumerateDevices();
       const cams = devices.filter((d) => d.kind === "videoinput");
       setCameraDevices(cams);
@@ -202,13 +235,30 @@ export default function Home() {
   async function startCamera() {
     try {
       stopCamera();
+      if (
+        typeof navigator === "undefined" ||
+        !navigator.mediaDevices ||
+        !window.isSecureContext
+      ) {
+        // No mediaDevices API available — likely not a browser or secure context.
+        setCameraStatus("error: camera not supported");
+        toast.error("Camera Not Supported", {
+          description:
+            "Camera access is only available on secure (HTTPS) connections or localhost.",
+        });
+        setIsCameraOpen(false);
+        return;
+      }
       setCameraStatus("starting");
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
           deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
           facingMode: selectedDeviceId ? undefined : { ideal: "environment" },
-          width: { ideal: 1920 },
-          height: { ideal: 1080 },
+          // Lower default resolution and request a reasonable frameRate to
+          // reduce CPU usage while keeping the camera responsive.
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 30, max: 60 },
         },
       });
       streamRef.current = stream;
@@ -216,6 +266,9 @@ export default function Home() {
         videoRef.current.srcObject = stream;
         trackRef.current = stream.getVideoTracks()[0];
         await videoRef.current.play();
+        // create a small offscreen canvas for processing (downscaled frames)
+        if (!processCanvasRef.current)
+          processCanvasRef.current = document.createElement("canvas");
         scanningRef.current = true;
         setCameraStatus("scanning");
         requestAnimationFrame(scanLoop);
@@ -238,30 +291,46 @@ export default function Home() {
     setCameraStatus("idle");
   }
   function scanLoop() {
-    if (!scanningRef.current || !videoRef.current || !canvasRef.current) return;
+    if (!scanningRef.current || !videoRef.current) return;
     const video = videoRef.current;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
     if (video.readyState === video.HAVE_ENOUGH_DATA) {
-      const w = video.videoWidth;
-      const h = video.videoHeight;
-      if (canvas.width !== w) canvas.width = w;
-      if (canvas.height !== h) canvas.height = h;
-      ctx.drawImage(video, 0, 0, w, h);
-      const imageData = ctx.getImageData(0, 0, w, h);
-      const code = jsQR(imageData.data, w, h, {
-        inversionAttempts: "dontInvert",
-      });
-      if (code && code.data) {
-        scanningRef.current = false;
-        stopCamera();
-        setIsCameraOpen(false);
-        submitOtpUrl(code.data);
+      // Throttle heavy processing (jsQR) to a target rate (SCAN_INTERVAL_MS)
+      const now = performance.now();
+      if (now - lastProcessRef.current >= SCAN_INTERVAL_MS) {
+        lastProcessRef.current = now;
+        const pCanvas = processCanvasRef.current;
+        if (pCanvas) {
+          const vW = video.videoWidth || video.clientWidth || 320;
+          const vH = video.videoHeight || video.clientHeight || 240;
+          // Target a smaller processing width to reduce pixels (maintain aspect)
+          const targetProcW = Math.min(640, vW);
+          const scale = targetProcW / vW;
+          const pw = Math.max(160, Math.floor(vW * scale));
+          const ph = Math.max(120, Math.floor(vH * scale));
+          if (pCanvas.width !== pw) pCanvas.width = pw;
+          if (pCanvas.height !== ph) pCanvas.height = ph;
+          const pCtx = pCanvas.getContext("2d");
+          try {
+            pCtx.drawImage(video, 0, 0, pw, ph);
+            const imageData = pCtx.getImageData(0, 0, pw, ph);
+            const code = jsQR(imageData.data, pw, ph, {
+              inversionAttempts: "dontInvert",
+            });
+            if (code && code.data) {
+              scanningRef.current = false;
+              stopCamera();
+              setIsCameraOpen(false);
+              submitOtpUrl(code.data);
+              return;
+            }
+          } catch (e) {
+            // getImageData or draw errors can occur on some devices; ignore and continue
+          }
+        }
       }
     }
-    if (scanningRef.current) {
-      requestAnimationFrame(scanLoop);
-    }
+    if (scanningRef.current) requestAnimationFrame(scanLoop);
   }
   async function toggleTorch() {
     const track = trackRef.current;
@@ -750,7 +819,6 @@ export default function Home() {
               playsInline
               muted
             />
-            <canvas ref={canvasRef} className="absolute inset-0" />
           </div>
           <div className="flex items-center justify-between gap-2">
             <select
