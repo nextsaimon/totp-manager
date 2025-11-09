@@ -75,6 +75,10 @@ export default function Home() {
   const [tempError, setTempError] = useState(null);
   const tempIntervalRef = useRef(null);
 
+  const [visibleOtp, setVisibleOtp] = useState({ id: null, token: "••• •••" });
+  const [otpTimeLeft, setOtpTimeLeft] = useState(0);
+  const otpIntervalRef = useRef(null);
+
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const streamRef = useRef(null);
@@ -93,6 +97,7 @@ export default function Home() {
         enumerateCameras
       );
       clearInterval(tempIntervalRef.current);
+      clearInterval(otpIntervalRef.current);
     };
   }, []);
 
@@ -143,6 +148,42 @@ export default function Home() {
     if (!tempOtp) return;
     navigator.clipboard.writeText(tempOtp);
     toast.success("Temporary code copied to clipboard!");
+  };
+
+  const toggleOtp = async (id) => {
+    clearInterval(otpIntervalRef.current);
+
+    if (visibleOtp.id === id) {
+      setVisibleOtp({ id: null, token: "••• •••" });
+      setOtpTimeLeft(0);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/totp/generate", {
+        method: "POST",
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ id }),
+      });
+      if (!res.ok) throw new Error("Failed to get token.");
+      const { token } = await res.json();
+      setVisibleOtp({ id, token });
+
+      const updateTimer = () => {
+        const timeLeft = 30 - (Math.floor(Date.now() / 1000) % 30);
+        setOtpTimeLeft(timeLeft);
+        if (timeLeft <= 1) {
+          clearInterval(otpIntervalRef.current);
+          setVisibleOtp({ id: null, token: "••• •••" });
+        }
+      };
+      updateTimer();
+      otpIntervalRef.current = setInterval(updateTimer, 1000);
+    } catch (error) {
+      toast.error("Error", { description: error.message });
+      setVisibleOtp({ id: null, token: "••• •••" });
+      setOtpTimeLeft(0);
+    }
   };
 
   async function enumerateCameras() {
@@ -335,32 +376,6 @@ export default function Home() {
       await fetchSecrets(passwordInput);
     } catch (error) {
       toast.error("Error", { description: error.message });
-    }
-  };
-  const toggleOtp = async (id) => {
-    const el = document.getElementById(`otp-${id}`);
-    if (!el) return;
-    if (el.innerText.includes("•")) {
-      try {
-        el.innerText = "......";
-        const res = await fetch("/api/totp/generate", {
-          method: "POST",
-          headers: getAuthHeaders(),
-          body: JSON.stringify({ id }),
-        });
-        if (!res.ok) throw new Error("Failed to get token.");
-        const { token } = await res.json();
-        el.innerText = token;
-        setTimeout(() => {
-          const currentEl = document.getElementById(`otp-${id}`);
-          if (currentEl) currentEl.innerText = "••• •••";
-        }, 30000);
-      } catch (error) {
-        toast.error("Error", { description: error.message });
-        el.innerText = "••• •••";
-      }
-    } else {
-      el.innerText = "••• •••";
     }
   };
   const copyOtp = async (id) => {
@@ -642,33 +657,45 @@ export default function Home() {
                       </Button>
                     </CardHeader>
                     <CardFooter className="mt-auto">
-                      <div className="bg-muted w-full p-3 rounded-lg flex justify-between items-center">
-                        <span
-                          className="text-2xl font-mono tracking-wider"
-                          id={`otp-${item._id}`}
-                        >
-                          ••• •••
-                        </span>
-                        <div className="flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => toggleOtp(item._id)}
-                          >
-                            <Eye className="h-5 w-5" />
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            onClick={() => copyOtp(item._id)}
-                          >
-                            {isCopied === item._id ? (
-                              <Check className="h-5 w-5 text-green-500" />
-                            ) : (
-                              <Copy className="h-5 w-5" />
-                            )}
-                          </Button>
+                      <div className="w-full space-y-2">
+                        <div className="bg-muted w-full p-3 rounded-lg flex justify-between items-center">
+                          <span className="text-2xl font-mono tracking-wider">
+                            {visibleOtp.id === item._id
+                              ? visibleOtp.token
+                              : "••• •••"}
+                          </span>
+                          <div className="flex gap-1">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => toggleOtp(item._id)}
+                            >
+                              <Eye className="h-5 w-5" />
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              onClick={() => copyOtp(item._id)}
+                            >
+                              {isCopied === item._id ? (
+                                <Check className="h-5 w-5 text-green-500" />
+                              ) : (
+                                <Copy className="h-5 w-5" />
+                              )}
+                            </Button>
+                          </div>
                         </div>
+                        {visibleOtp.id === item._id && (
+                          <div className="flex items-center gap-2">
+                            <Progress
+                              value={(otpTimeLeft / 30) * 100}
+                              className="h-2"
+                            />
+                            <span className="text-xs text-muted-foreground">
+                              {otpTimeLeft}s
+                            </span>
+                          </div>
+                        )}
                       </div>
                     </CardFooter>
                   </Card>
