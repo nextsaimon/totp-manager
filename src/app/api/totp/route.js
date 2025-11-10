@@ -136,10 +136,29 @@ export async function DELETE(req) {
   try {
     const db = await connectDB();
     const collection = db.collection("totp");
-    const { id } = await req.json();
+    const { id, label } = await req.json();
     if (!id || !ObjectId.isValid(id)) {
       return NextResponse.json(
         { error: "Invalid ID provided" },
+        { status: 400 }
+      );
+    }
+    if (!label) {
+      return NextResponse.json(
+        { error: "Label is required for deletion" },
+        { status: 400 }
+      );
+    }
+    const secretToDelete = await collection.findOne({ _id: new ObjectId(id) });
+    if (!secretToDelete) {
+      return NextResponse.json(
+        { error: "Secret not found with the given ID" },
+        { status: 404 }
+      );
+    }
+    if (secretToDelete.label !== label) {
+      return NextResponse.json(
+        { error: "Label does not match. Deletion failed." },
         { status: 400 }
       );
     }

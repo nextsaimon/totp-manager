@@ -59,6 +59,7 @@ export default function Home() {
   const [note, setNote] = useState("");
   const [isCopied, setIsCopied] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteLabelConfirmation, setDeleteLabelConfirmation] = useState("");
   const [editingTargetId, setEditingTargetId] = useState(null);
   const [editingNoteContent, setEditingNoteContent] = useState("");
 
@@ -419,9 +420,15 @@ export default function Home() {
       const res = await fetch("/api/totp", {
         method: "DELETE",
         headers: getAuthHeaders(),
-        body: JSON.stringify({ id: deleteTarget._id }),
+        body: JSON.stringify({
+          id: deleteTarget._id,
+          label: deleteLabelConfirmation,
+        }),
       });
-      if (!res.ok) throw new Error("Failed to delete secret.");
+      if (!res.ok) {
+        const data = await res.json();
+        throw new Error(data.error || "Failed to delete secret.");
+      }
       toast.success("Deleted", {
         description: `Secret for "${deleteTarget.label}" removed.`,
       });
@@ -430,6 +437,7 @@ export default function Home() {
       toast.error("Error", { description: error.message });
     } finally {
       setDeleteTarget(null);
+      setDeleteLabelConfirmation("");
     }
   };
   const handleSaveNote = async (id) => {
@@ -781,7 +789,12 @@ export default function Home() {
       </div>
       <AlertDialog
         open={!!deleteTarget}
-        onOpenChange={(open) => !open && setDeleteTarget(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDeleteTarget(null);
+            setDeleteLabelConfirmation("");
+          }
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -790,13 +803,28 @@ export default function Home() {
               This action cannot be undone. This will permanently delete the
               TOTP secret for <br />
               <strong className="text-foreground">{deleteTarget?.label}</strong>
-              .
+              <br />
+              <br />
+              To confirm, please type the label below.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          <div className="grid gap-2">
+            <Label htmlFor="delete-confirm" className="sr-only">
+              Confirm Label
+            </Label>
+            <Input
+              id="delete-confirm"
+              value={deleteLabelConfirmation}
+              onChange={(e) => setDeleteLabelConfirmation(e.target.value)}
+              placeholder={deleteTarget?.label}
+              autoFocus
+            />
+          </div>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction
               onClick={handleConfirmDelete}
+              disabled={deleteLabelConfirmation !== deleteTarget?.label}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               Delete
