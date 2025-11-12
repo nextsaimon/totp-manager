@@ -14,6 +14,7 @@ import {
   Camera,
   Zap,
   Sparkles,
+  Search,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -62,6 +63,7 @@ export default function Home() {
   const [deleteLabelConfirmation, setDeleteLabelConfirmation] = useState("");
   const [editingTargetId, setEditingTargetId] = useState(null);
   const [editingNoteContent, setEditingNoteContent] = useState("");
+  const [searchQuery, setSearchQuery] = useState("");
 
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
@@ -71,7 +73,7 @@ export default function Home() {
 
   const [isTempGeneratorOpen, setIsTempGeneratorOpen] = useState(false);
   const [tempSecret, setTempSecret] = useState("");
-  const [tempOtp, setTempOtp] = useState(null); // FIX: Changed from = null to = useState(null)
+  const [tempOtp, setTempOtp] = useState(null);
   const [tempTimeLeft, setTempTimeLeft] = useState(0);
   const [tempError, setTempError] = useState(null);
   const tempIntervalRef = useRef(null);
@@ -81,7 +83,6 @@ export default function Home() {
   const otpIntervalRef = useRef(null);
 
   const videoRef = useRef(null);
-  const canvasRef = useRef(null);
   const processCanvasRef = useRef(null);
   const streamRef = useRef(null);
   const trackRef = useRef(null);
@@ -106,6 +107,7 @@ export default function Home() {
     setDeleteTarget(null);
     setEditingTargetId(null);
     setPreview(null);
+    setSearchQuery("");
     toast.info("Logged out due to inactivity.");
   }, []);
 
@@ -128,14 +130,12 @@ export default function Home() {
       }
     }
 
-    // Add activity listeners
     const handleActivity = () => {
       if (isAuthenticated) {
         resetAutoLogoutTimer();
       }
     };
 
-    // Only add event listeners in the browser environment
     if (typeof window !== "undefined") {
       window.addEventListener("mousemove", handleActivity);
       window.addEventListener("keydown", handleActivity);
@@ -157,9 +157,6 @@ export default function Home() {
   }, [isAuthenticated, resetAutoLogoutTimer]);
 
   useEffect(() => {
-    // Only attempt to enumerate devices and attach listeners when running in
-    // a browser environment that exposes navigator.mediaDevices. This avoids
-    // errors during SSR or in environments without camera support.
     if (
       typeof navigator !== "undefined" &&
       navigator.mediaDevices &&
@@ -283,7 +280,6 @@ export default function Home() {
         !navigator.mediaDevices ||
         typeof navigator.mediaDevices.enumerateDevices !== "function"
       ) {
-        // Not running in a browser or mediaDevices not available.
         setCameraDevices([]);
         return;
       }
@@ -298,6 +294,7 @@ export default function Home() {
       console.error("Could not enumerate cameras:", e);
     }
   }
+
   async function startCamera() {
     try {
       stopCamera();
@@ -306,7 +303,6 @@ export default function Home() {
         !navigator.mediaDevices ||
         !window.isSecureContext
       ) {
-        // No mediaDevices API available — likely not a browser or secure context.
         setCameraStatus("error: camera not supported");
         toast.error("Camera Not Supported", {
           description:
@@ -320,8 +316,6 @@ export default function Home() {
         video: {
           deviceId: selectedDeviceId ? { exact: selectedDeviceId } : undefined,
           facingMode: selectedDeviceId ? undefined : { ideal: "environment" },
-          // Lower default resolution and request a reasonable frameRate to
-          // reduce CPU usage while keeping the camera responsive.
           width: { ideal: 1280 },
           height: { ideal: 720 },
           frameRate: { ideal: 30, max: 60 },
@@ -332,7 +326,6 @@ export default function Home() {
         videoRef.current.srcObject = stream;
         trackRef.current = stream.getVideoTracks()[0];
         await videoRef.current.play();
-        // create a small offscreen canvas for processing (downscaled frames)
         if (!processCanvasRef.current)
           processCanvasRef.current = document.createElement("canvas");
         scanningRef.current = true;
@@ -347,6 +340,7 @@ export default function Home() {
       setIsCameraOpen(false);
     }
   }
+
   function stopCamera() {
     scanningRef.current = false;
     setTorchOn(false);
@@ -356,12 +350,12 @@ export default function Home() {
     }
     setCameraStatus("idle");
   }
+
   function scanLoop() {
     if (!scanningRef.current || !videoRef.current) return;
     const video = videoRef.current;
 
     if (video.readyState === video.HAVE_ENOUGH_DATA) {
-      // Throttle heavy processing (jsQR) to a target rate (SCAN_INTERVAL_MS)
       const now = performance.now();
       if (now - lastProcessRef.current >= SCAN_INTERVAL_MS) {
         lastProcessRef.current = now;
@@ -369,7 +363,6 @@ export default function Home() {
         if (pCanvas) {
           const vW = video.videoWidth || video.clientWidth || 320;
           const vH = video.videoHeight || video.clientHeight || 240;
-          // Target a smaller processing width to reduce pixels (maintain aspect)
           const targetProcW = Math.min(640, vW);
           const scale = targetProcW / vW;
           const pw = Math.max(160, Math.floor(vW * scale));
@@ -391,13 +384,14 @@ export default function Home() {
               return;
             }
           } catch (e) {
-            // getImageData or draw errors can occur on some devices; ignore and continue
+            // ignore
           }
         }
       }
     }
     if (scanningRef.current) requestAnimationFrame(scanLoop);
   }
+
   async function toggleTorch() {
     const track = trackRef.current;
     if (!track) return toast.error("Camera not active");
@@ -412,10 +406,12 @@ export default function Home() {
       toast.error("Failed to toggle flashlight.");
     }
   }
+
   const getAuthHeaders = () => ({
     "Content-Type": "application/json",
     "X-App-Password": passwordInput,
   });
+
   const fetchSecrets = async (password) => {
     try {
       setIsLoading(true);
@@ -433,7 +429,6 @@ export default function Home() {
       const data = await res.json();
       setSecrets(data);
       setIsAuthenticated(true);
-      resetAutoLogoutTimer(); // Reset timer on successful login
     } catch (error) {
       toast.error("Authentication Failed", { description: error.message });
       setIsAuthenticated(false);
@@ -442,12 +437,14 @@ export default function Home() {
       setIsAuthenticating(false);
     }
   };
+
   const handlePasswordSubmit = async (e) => {
     e.preventDefault();
     if (!passwordInput) return toast.error("Password cannot be empty.");
     setIsAuthenticating(true);
     await fetchSecrets(passwordInput);
   };
+
   const submitOtpUrl = async (url) => {
     try {
       const res = await fetch("/api/totp", {
@@ -468,6 +465,7 @@ export default function Home() {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
+
   const handleAddSecretFromFile = async () => {
     if (!preview)
       return toast.error("No Image", {
@@ -480,6 +478,7 @@ export default function Home() {
       toast.error("Scan Failed", { description: error.message });
     }
   };
+
   const handleConfirmDelete = async () => {
     if (!deleteTarget) return;
     try {
@@ -506,6 +505,7 @@ export default function Home() {
       setDeleteLabelConfirmation("");
     }
   };
+
   const handleSaveNote = async (id) => {
     try {
       const res = await fetch("/api/totp", {
@@ -521,6 +521,7 @@ export default function Home() {
       toast.error("Error", { description: error.message });
     }
   };
+
   const copyOtp = async (id) => {
     try {
       const res = await fetch("/api/totp/generate", {
@@ -538,14 +539,17 @@ export default function Home() {
       toast.error("Error", { description: error.message });
     }
   };
+
   const handleEditClick = (secret) => {
     setEditingTargetId(secret._id);
     setEditingNoteContent(secret.note || "");
   };
+
   const handleCancelEdit = () => {
     setEditingTargetId(null);
     setEditingNoteContent("");
   };
+
   const scanQrCode = (imageSrc) =>
     new Promise((resolve, reject) => {
       const img = new Image();
@@ -563,11 +567,13 @@ export default function Home() {
       };
       img.onerror = () => reject("Failed to load image.");
     });
+
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
     if (file) setPreview(URL.createObjectURL(file));
     else setPreview(null);
   };
+
   const handlePaste = (e) => {
     const items = e.clipboardData.items;
     for (const item of items) {
@@ -577,6 +583,13 @@ export default function Home() {
       }
     }
   };
+
+  const filteredSecrets = secrets.filter(
+    (item) =>
+      item.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (item.note && item.note.toLowerCase().includes(searchQuery.toLowerCase()))
+  );
+
   const SecretCardSkeleton = () => (
     <Card className="flex flex-col">
       <CardHeader className="flex-row justify-between items-start">
@@ -734,113 +747,137 @@ export default function Home() {
                 <SecretCardSkeleton />
               </div>
             ) : secrets.length > 0 ? (
-              <div className="grid sm:grid-cols-2 gap-4">
-                {secrets.map((item) => (
-                  <Card key={item._id} className="flex flex-col">
-                    <CardHeader className="flex-row justify-between items-start gap-2">
-                      <div className="space-y-2 grow overflow-hidden">
-                        <CardTitle className="truncate" title={item.label}>
-                          {item.label}
-                        </CardTitle>
-                        {editingTargetId === item._id ? (
-                          <div className="space-y-2">
-                            <Textarea
-                              value={editingNoteContent}
-                              onChange={(e) =>
-                                setEditingNoteContent(e.target.value)
-                              }
-                              className="text-sm h-24"
-                              autoFocus
-                            />
-                            <div className="flex gap-2 justify-end">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={handleCancelEdit}
-                              >
-                                Cancel
-                              </Button>
-                              <Button
-                                size="sm"
-                                onClick={() => handleSaveNote(item._id)}
-                              >
-                                Save
-                              </Button>
+              <>
+                <div className="relative mb-6">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    type="search"
+                    placeholder="Search by label or note..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-9"
+                  />
+                </div>
+                {filteredSecrets.length > 0 ? (
+                  <div className="grid sm:grid-cols-2 gap-4">
+                    {filteredSecrets.map((item) => (
+                      <Card key={item._id} className="flex flex-col">
+                        <CardHeader className="flex-row justify-between items-start gap-2">
+                          <div className="space-y-2 grow overflow-hidden">
+                            <CardTitle className="truncate" title={item.label}>
+                              {item.label}
+                            </CardTitle>
+                            {editingTargetId === item._id ? (
+                              <div className="space-y-2">
+                                <Textarea
+                                  value={editingNoteContent}
+                                  onChange={(e) =>
+                                    setEditingNoteContent(e.target.value)
+                                  }
+                                  className="text-sm h-24"
+                                  autoFocus
+                                />
+                                <div className="flex gap-2 justify-end">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={handleCancelEdit}
+                                  >
+                                    Cancel
+                                  </Button>
+                                  <Button
+                                    size="sm"
+                                    onClick={() => handleSaveNote(item._id)}
+                                  >
+                                    Save
+                                  </Button>
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex items-start justify-between gap-2 group">
+                                <CardDescription
+                                  className="whitespace-pre-wrap grow"
+                                  title={item.note}
+                                >
+                                  {item.note || "No note"}
+                                </CardDescription>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                  onClick={() => handleEditClick(item)}
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                              </div>
+                            )}
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="shrink-0"
+                            onClick={() => setDeleteTarget(item)}
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </Button>
+                        </CardHeader>
+                        <CardFooter className="mt-auto">
+                          <div className="w-full space-y-2">
+                            <div className="bg-muted w-full p-3 rounded-lg flex justify-between items-center">
+                              <span className="text-2xl font-mono tracking-wider">
+                                {visibleOtp.id === item._id
+                                  ? visibleOtp.token
+                                  : "••• •••"}
+                              </span>
+                              <div className="flex gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => toggleOtp(item._id)}
+                                >
+                                  <Eye className="h-5 w-5" />
+                                </Button>
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  onClick={() => copyOtp(item._id)}
+                                >
+                                  {isCopied === item._id ? (
+                                    <Check className="h-5 w-5 text-green-500" />
+                                  ) : (
+                                    <Copy className="h-5 w-5" />
+                                  )}
+                                </Button>
+                              </div>
                             </div>
+                            {visibleOtp.id === item._id && (
+                              <div className="flex items-center gap-2">
+                                <Progress
+                                  value={(otpTimeLeft / 30) * 100}
+                                  className="h-2"
+                                />
+                                <span className="text-xs text-muted-foreground">
+                                  {otpTimeLeft}s
+                                </span>
+                              </div>
+                            )}
                           </div>
-                        ) : (
-                          <div className="flex items-start justify-between gap-2 group">
-                            <CardDescription
-                              className="whitespace-pre-wrap grow"
-                              title={item.note}
-                            >
-                              {item.note || "No note"}
-                            </CardDescription>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                              onClick={() => handleEditClick(item)}
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </Button>
-                          </div>
-                        )}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="shrink-0"
-                        onClick={() => setDeleteTarget(item)}
-                      >
-                        <Trash2 className="h-4 w-4 text-destructive" />
-                      </Button>
-                    </CardHeader>
-                    <CardFooter className="mt-auto">
-                      <div className="w-full space-y-2">
-                        <div className="bg-muted w-full p-3 rounded-lg flex justify-between items-center">
-                          <span className="text-2xl font-mono tracking-wider">
-                            {visibleOtp.id === item._id
-                              ? visibleOtp.token
-                              : "••• •••"}
-                          </span>
-                          <div className="flex gap-1">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => toggleOtp(item._id)}
-                            >
-                              <Eye className="h-5 w-5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              onClick={() => copyOtp(item._id)}
-                            >
-                              {isCopied === item._id ? (
-                                <Check className="h-5 w-5 text-green-500" />
-                              ) : (
-                                <Copy className="h-5 w-5" />
-                              )}
-                            </Button>
-                          </div>
-                        </div>
-                        {visibleOtp.id === item._id && (
-                          <div className="flex items-center gap-2">
-                            <Progress
-                              value={(otpTimeLeft / 30) * 100}
-                              className="h-2"
-                            />
-                            <span className="text-xs text-muted-foreground">
-                              {otpTimeLeft}s
-                            </span>
-                          </div>
-                        )}
-                      </div>
-                    </CardFooter>
-                  </Card>
-                ))}
-              </div>
+                        </CardFooter>
+                      </Card>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="text-center text-muted-foreground mt-16">
+                    <h3 className="text-lg font-semibold">
+                      No Matching Secrets
+                    </h3>
+                    <p>
+                      Your search for "{searchQuery}" did not return any
+                      results.
+                    </p>
+                  </div>
+                )}
+              </>
             ) : (
               <div className="text-center text-muted-foreground mt-16">
                 <h3 className="text-lg font-semibold">No secrets found</h3>
