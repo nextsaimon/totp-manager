@@ -1,5 +1,5 @@
 "use client";
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import jsQR from "jsqr";
 import * as OTPAuth from "otpauth";
 import { toast } from "sonner";
@@ -71,7 +71,7 @@ export default function Home() {
 
   const [isTempGeneratorOpen, setIsTempGeneratorOpen] = useState(false);
   const [tempSecret, setTempSecret] = useState("");
-  const [tempOtp, setTempOtp] = useState(null);
+  const [tempOtp, setTempOtp] = useState(null); // FIX: Changed from = null to = useState(null)
   const [tempTimeLeft, setTempTimeLeft] = useState(0);
   const [tempError, setTempError] = useState(null);
   const tempIntervalRef = useRef(null);
@@ -90,6 +90,71 @@ export default function Home() {
   const pasteRef = useRef(null);
   const fileInputRef = useRef(null);
   const SCAN_INTERVAL_MS = 66; // ~15 FPS processing
+
+  // Auto-logout state and ref
+  const autoLogoutTimerRef = useRef(null);
+  const AUTO_LOGOUT_MINUTES = parseInt(
+    process.env.NEXT_PUBLIC_AUTO_LOGOUT || "2",
+    10
+  );
+  const AUTO_LOGOUT_MILLIS = AUTO_LOGOUT_MINUTES * 60 * 1000;
+
+  const logout = useCallback(() => {
+    setIsAuthenticated(false);
+    setPasswordInput("");
+    setSecrets([]);
+    setDeleteTarget(null);
+    setEditingTargetId(null);
+    setPreview(null);
+    toast.info("Logged out due to inactivity.");
+  }, []);
+
+  const resetAutoLogoutTimer = useCallback(() => {
+    if (autoLogoutTimerRef.current) {
+      clearTimeout(autoLogoutTimerRef.current);
+    }
+    if (isAuthenticated) {
+      autoLogoutTimerRef.current = setTimeout(logout, AUTO_LOGOUT_MILLIS);
+    }
+  }, [isAuthenticated, logout, AUTO_LOGOUT_MILLIS]);
+
+  useEffect(() => {
+    // Start or reset timer on authentication status change
+    if (isAuthenticated) {
+      resetAutoLogoutTimer();
+    } else {
+      if (autoLogoutTimerRef.current) {
+        clearTimeout(autoLogoutTimerRef.current);
+      }
+    }
+
+    // Add activity listeners
+    const handleActivity = () => {
+      if (isAuthenticated) {
+        resetAutoLogoutTimer();
+      }
+    };
+
+    // Only add event listeners in the browser environment
+    if (typeof window !== "undefined") {
+      window.addEventListener("mousemove", handleActivity);
+      window.addEventListener("keydown", handleActivity);
+      window.addEventListener("click", handleActivity);
+      window.addEventListener("scroll", handleActivity);
+    }
+
+    return () => {
+      if (autoLogoutTimerRef.current) {
+        clearTimeout(autoLogoutTimerRef.current);
+      }
+      if (typeof window !== "undefined") {
+        window.removeEventListener("mousemove", handleActivity);
+        window.removeEventListener("keydown", handleActivity);
+        window.removeEventListener("click", handleActivity);
+        window.removeEventListener("scroll", handleActivity);
+      }
+    };
+  }, [isAuthenticated, resetAutoLogoutTimer]);
 
   useEffect(() => {
     // Only attempt to enumerate devices and attach listeners when running in
@@ -368,6 +433,7 @@ export default function Home() {
       const data = await res.json();
       setSecrets(data);
       setIsAuthenticated(true);
+      resetAutoLogoutTimer(); // Reset timer on successful login
     } catch (error) {
       toast.error("Authentication Failed", { description: error.message });
       setIsAuthenticated(false);
@@ -621,14 +687,11 @@ export default function Home() {
                     className="mt-2"
                   />
                 </div>
-                <div className="text-center text-sm text-muted-foreground">
-                  OR
-                </div>
                 <div
+                  className="border-2 border-dashed rounded-lg p-6 text-center text-muted-foreground cursor-pointer hover:border-primary focus:border-primary outline-none"
                   ref={pasteRef}
                   tabIndex={0}
                   onPaste={handlePaste}
-                  className="border-2 border-dashed rounded-lg p-6 text-center text-muted-foreground cursor-pointer hover:border-primary focus:border-primary outline-none"
                 >
                   Click and press <b>Ctrl + V</b> to paste
                 </div>

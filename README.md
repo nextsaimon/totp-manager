@@ -18,6 +18,7 @@ This application is built with a security-first approach: your sensitive TOTP se
 -   🖱️ **One-Click Copy**: Generate and copy TOTP codes to your clipboard with a single click.
 -   🎨 **Theme Support**: Includes automatic Light/Dark mode based on your system preference, with a manual theme toggler.
 -   📱 **Responsive Design**: Clean and modern UI that works seamlessly on both desktop and mobile devices.
+-   ⏰ **Auto Logout**: Automatically logs you out after a period of inactivity to enhance security and prevent unauthorized access.  
 
 ## Tech Stack
 
@@ -63,6 +64,7 @@ MONGODB_URI=
 DATABASE_NAME=
 APP_PASSWORD=
 COLLECTION_NAME=
+NEXT_PUBLIC_AUTO_LOGOUT=
 
 # Brute-Force Protection Settings
 MAX_LOGIN_ATTEMPTS=5
