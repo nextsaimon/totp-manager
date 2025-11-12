@@ -15,6 +15,8 @@ import {
   Zap,
   Sparkles,
   Search,
+  PlusCircle,
+  Link,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -49,6 +51,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ThemeToggle } from "@/components/theme-toggle";
 import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 export default function Home() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -64,6 +67,11 @@ export default function Home() {
   const [editingTargetId, setEditingTargetId] = useState(null);
   const [editingNoteContent, setEditingNoteContent] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Input states for adding secrets
+  const [manualLabel, setManualLabel] = useState("");
+  const [manualSecret, setManualSecret] = useState("");
+  const [directUrl, setDirectUrl] = useState("");
 
   const [isCameraOpen, setIsCameraOpen] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
@@ -92,7 +100,6 @@ export default function Home() {
   const fileInputRef = useRef(null);
   const SCAN_INTERVAL_MS = 66; // ~15 FPS processing
 
-  // Auto-logout state and ref
   const autoLogoutTimerRef = useRef(null);
   const AUTO_LOGOUT_MINUTES = parseInt(
     process.env.NEXT_PUBLIC_AUTO_LOGOUT || "2",
@@ -121,19 +128,14 @@ export default function Home() {
   }, [isAuthenticated, logout, AUTO_LOGOUT_MILLIS]);
 
   useEffect(() => {
-    // Start or reset timer on authentication status change
     if (isAuthenticated) {
       resetAutoLogoutTimer();
-    } else {
-      if (autoLogoutTimerRef.current) {
-        clearTimeout(autoLogoutTimerRef.current);
-      }
+    } else if (autoLogoutTimerRef.current) {
+      clearTimeout(autoLogoutTimerRef.current);
     }
 
     const handleActivity = () => {
-      if (isAuthenticated) {
-        resetAutoLogoutTimer();
-      }
+      if (isAuthenticated) resetAutoLogoutTimer();
     };
 
     if (typeof window !== "undefined") {
@@ -144,9 +146,7 @@ export default function Home() {
     }
 
     return () => {
-      if (autoLogoutTimerRef.current) {
-        clearTimeout(autoLogoutTimerRef.current);
-      }
+      if (autoLogoutTimerRef.current) clearTimeout(autoLogoutTimerRef.current);
       if (typeof window !== "undefined") {
         window.removeEventListener("mousemove", handleActivity);
         window.removeEventListener("keydown", handleActivity);
@@ -159,30 +159,17 @@ export default function Home() {
   useEffect(() => {
     if (
       typeof navigator !== "undefined" &&
-      navigator.mediaDevices &&
-      typeof navigator.mediaDevices.enumerateDevices === "function"
+      navigator.mediaDevices?.enumerateDevices
     ) {
       enumerateCameras();
-      try {
-        navigator.mediaDevices.addEventListener(
-          "devicechange",
-          enumerateCameras
-        );
-      } catch (e) {
-        // some environments may not support addEventListener on mediaDevices
-      }
+      navigator.mediaDevices.addEventListener("devicechange", enumerateCameras);
     }
-
     return () => {
       stopCamera();
-      try {
-        navigator?.mediaDevices?.removeEventListener?.(
-          "devicechange",
-          enumerateCameras
-        );
-      } catch (e) {
-        // ignore
-      }
+      navigator.mediaDevices?.removeEventListener(
+        "devicechange",
+        enumerateCameras
+      );
       clearInterval(tempIntervalRef.current);
       clearInterval(otpIntervalRef.current);
     };
@@ -275,14 +262,6 @@ export default function Home() {
 
   async function enumerateCameras() {
     try {
-      if (
-        typeof navigator === "undefined" ||
-        !navigator.mediaDevices ||
-        typeof navigator.mediaDevices.enumerateDevices !== "function"
-      ) {
-        setCameraDevices([]);
-        return;
-      }
       const devices = await navigator.mediaDevices.enumerateDevices();
       const cams = devices.filter((d) => d.kind === "videoinput");
       setCameraDevices(cams);
@@ -298,15 +277,10 @@ export default function Home() {
   async function startCamera() {
     try {
       stopCamera();
-      if (
-        typeof navigator === "undefined" ||
-        !navigator.mediaDevices ||
-        !window.isSecureContext
-      ) {
+      if (!navigator.mediaDevices || !window.isSecureContext) {
         setCameraStatus("error: camera not supported");
         toast.error("Camera Not Supported", {
-          description:
-            "Camera access is only available on secure (HTTPS) connections or localhost.",
+          description: "Camera access requires a secure (HTTPS) connection.",
         });
         setIsCameraOpen(false);
         return;
@@ -318,7 +292,6 @@ export default function Home() {
           facingMode: selectedDeviceId ? undefined : { ideal: "environment" },
           width: { ideal: 1280 },
           height: { ideal: 720 },
-          frameRate: { ideal: 30, max: 60 },
         },
       });
       streamRef.current = stream;
@@ -354,37 +327,33 @@ export default function Home() {
   function scanLoop() {
     if (!scanningRef.current || !videoRef.current) return;
     const video = videoRef.current;
-
     if (video.readyState === video.HAVE_ENOUGH_DATA) {
       const now = performance.now();
       if (now - lastProcessRef.current >= SCAN_INTERVAL_MS) {
         lastProcessRef.current = now;
         const pCanvas = processCanvasRef.current;
         if (pCanvas) {
-          const vW = video.videoWidth || video.clientWidth || 320;
-          const vH = video.videoHeight || video.clientHeight || 240;
+          const vW = video.videoWidth;
+          const vH = video.videoHeight;
           const targetProcW = Math.min(640, vW);
           const scale = targetProcW / vW;
-          const pw = Math.max(160, Math.floor(vW * scale));
-          const ph = Math.max(120, Math.floor(vH * scale));
-          if (pCanvas.width !== pw) pCanvas.width = pw;
-          if (pCanvas.height !== ph) pCanvas.height = ph;
+          pCanvas.width = vW * scale;
+          pCanvas.height = vH * scale;
           const pCtx = pCanvas.getContext("2d");
-          try {
-            pCtx.drawImage(video, 0, 0, pw, ph);
-            const imageData = pCtx.getImageData(0, 0, pw, ph);
-            const code = jsQR(imageData.data, pw, ph, {
-              inversionAttempts: "dontInvert",
-            });
-            if (code && code.data) {
-              scanningRef.current = false;
-              stopCamera();
-              setIsCameraOpen(false);
-              submitOtpUrl(code.data);
-              return;
-            }
-          } catch (e) {
-            // ignore
+          pCtx.drawImage(video, 0, 0, pCanvas.width, pCanvas.height);
+          const imageData = pCtx.getImageData(
+            0,
+            0,
+            pCanvas.width,
+            pCanvas.height
+          );
+          const code = jsQR(imageData.data, imageData.width, imageData.height);
+          if (code?.data) {
+            scanningRef.current = false;
+            stopCamera();
+            setIsCameraOpen(false);
+            submitOtpData({ url: code.data });
+            return;
           }
         }
       }
@@ -394,16 +363,16 @@ export default function Home() {
 
   async function toggleTorch() {
     const track = trackRef.current;
-    if (!track) return toast.error("Camera not active");
-    const capabilities = track.getCapabilities?.();
-    if (!capabilities || !capabilities.torch)
-      return toast.error("Flashlight not supported.");
-    const newTorchState = !torchOn;
-    try {
-      await track.applyConstraints({ advanced: [{ torch: newTorchState }] });
-      setTorchOn(newTorchState);
-    } catch (e) {
-      toast.error("Failed to toggle flashlight.");
+    if (track?.getCapabilities().torch) {
+      try {
+        const newTorchState = !torchOn;
+        await track.applyConstraints({ advanced: [{ torch: newTorchState }] });
+        setTorchOn(newTorchState);
+      } catch (e) {
+        toast.error("Failed to toggle flashlight.");
+      }
+    } else {
+      toast.error("Flashlight not supported.");
     }
   }
 
@@ -413,18 +382,19 @@ export default function Home() {
   });
 
   const fetchSecrets = async (password) => {
+    setIsLoading(true);
     try {
-      setIsLoading(true);
       const res = await fetch("/api/totp", {
         headers: { "X-App-Password": password },
       });
       if (!res.ok) {
-        if (res.status === 429) {
-          const data = await res.json();
-          throw new Error(data.error || "Too many attempts.");
-        }
-        if (res.status === 401) throw new Error("Incorrect password.");
-        throw new Error("Failed to fetch secrets.");
+        const data = await res.json().catch(() => ({}));
+        throw new Error(
+          data.error ||
+            (res.status === 401
+              ? "Incorrect password."
+              : "Failed to fetch secrets.")
+        );
       }
       const data = await res.json();
       setSecrets(data);
@@ -445,38 +415,57 @@ export default function Home() {
     await fetchSecrets(passwordInput);
   };
 
-  const submitOtpUrl = async (url) => {
+  // Generic function to submit TOTP data
+  const submitOtpData = async (payload) => {
     try {
       const res = await fetch("/api/totp", {
         method: "POST",
         headers: getAuthHeaders(),
-        body: JSON.stringify({ url, note }),
+        body: JSON.stringify({ ...payload, note }),
       });
       if (!res.ok)
         throw new Error((await res.json()).error || "Failed to add secret.");
       toast.success("Success!", { description: "New TOTP secret added." });
       setNote("");
       setPreview(null);
+      setManualLabel("");
+      setManualSecret("");
+      setDirectUrl("");
       await fetchSecrets(passwordInput);
     } catch (error) {
       toast.error("Error Adding Secret", { description: error.message });
-      setPreview(null);
     } finally {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
   const handleAddSecretFromFile = async () => {
-    if (!preview)
-      return toast.error("No Image", {
-        description: "Please upload or paste an image.",
-      });
+    if (!preview) return toast.error("No image selected.");
     try {
       const otpUrl = await scanQrCode(preview);
-      await submitOtpUrl(otpUrl);
+      await submitOtpData({ url: otpUrl });
     } catch (error) {
       toast.error("Scan Failed", { description: error.message });
     }
+  };
+
+  const handleAddSecretManually = async () => {
+    if (!manualLabel.trim()) {
+      return toast.error("Label is required.");
+    }
+    if (!manualSecret.trim()) {
+      return toast.error("Secret key is required.");
+    }
+    await submitOtpData({ label: manualLabel, secret: manualSecret });
+  };
+
+  const handleAddSecretFromUrl = async () => {
+    if (!directUrl.trim().startsWith("otpauth://")) {
+      return toast.error("Invalid URL", {
+        description: "Please provide a valid otpauth:// URL.",
+      });
+    }
+    await submitOtpData({ url: directUrl });
   };
 
   const handleConfirmDelete = async () => {
@@ -490,10 +479,8 @@ export default function Home() {
           label: deleteLabelConfirmation,
         }),
       });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to delete secret.");
-      }
+      if (!res.ok)
+        throw new Error((await res.json()).error || "Failed to delete.");
       toast.success("Deleted", {
         description: `Secret for "${deleteTarget.label}" removed.`,
       });
@@ -562,32 +549,28 @@ export default function Home() {
         ctx.drawImage(img, 0, 0, img.width, img.height);
         const imageData = ctx.getImageData(0, 0, img.width, img.height);
         const code = jsQR(imageData.data, imageData.width, imageData.height);
-        if (code && code.data) resolve(code.data);
-        else reject("No QR code found.");
+        if (code?.data) resolve(code.data);
+        else reject("No QR code found in the image.");
       };
       img.onerror = () => reject("Failed to load image.");
     });
 
   const handleFileUpload = (e) => {
     const file = e.target.files?.[0];
-    if (file) setPreview(URL.createObjectURL(file));
-    else setPreview(null);
+    setPreview(file ? URL.createObjectURL(file) : null);
   };
 
   const handlePaste = (e) => {
-    const items = e.clipboardData.items;
-    for (const item of items) {
-      if (item.type.startsWith("image/")) {
-        const blob = item.getAsFile();
-        if (blob) setPreview(URL.createObjectURL(blob));
-      }
-    }
+    const file = Array.from(e.clipboardData.items)
+      .find((item) => item.type.startsWith("image/"))
+      ?.getAsFile();
+    if (file) setPreview(URL.createObjectURL(file));
   };
 
   const filteredSecrets = secrets.filter(
     (item) =>
       item.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (item.note && item.note.toLowerCase().includes(searchQuery.toLowerCase()))
+      item.note?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
   const SecretCardSkeleton = () => (
@@ -682,61 +665,140 @@ export default function Home() {
                   Choose a method to add a new secret.
                 </CardDescription>
               </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                <Button variant="outline" onClick={() => setIsCameraOpen(true)}>
-                  <Camera className="mr-2 h-4 w-4" /> Scan with Camera
-                </Button>
-                <div className="text-center text-sm text-muted-foreground">
-                  OR
-                </div>
-                <div>
-                  <Label htmlFor="qr-upload">Upload from file</Label>
-                  <Input
-                    ref={fileInputRef}
-                    id="qr-upload"
-                    type="file"
-                    accept="image/*"
-                    onChange={handleFileUpload}
-                    className="mt-2"
-                  />
-                </div>
-                <div
-                  className="border-2 border-dashed rounded-lg p-6 text-center text-muted-foreground cursor-pointer hover:border-primary focus:border-primary outline-none"
-                  ref={pasteRef}
-                  tabIndex={0}
-                  onPaste={handlePaste}
-                >
-                  Click and press <b>Ctrl + V</b> to paste
-                </div>
-                {preview && (
-                  <div className="mt-2 space-y-2">
-                    <Label>Image Preview</Label>
-                    <div className="flex justify-center">
-                      <img
-                        src={preview}
-                        alt="QR preview"
-                        className="rounded-lg border max-h-40"
+              <CardContent>
+                <Tabs defaultValue="scan" className="w-full">
+                  <TabsList className="grid w-full grid-cols-3">
+                    <TabsTrigger value="scan">Scan/Upload</TabsTrigger>
+                    <TabsTrigger value="manual">Manual</TabsTrigger>
+                    <TabsTrigger value="url">URL</TabsTrigger>
+                  </TabsList>
+                  <TabsContent
+                    value="scan"
+                    className="flex flex-col gap-4 pt-4"
+                  >
+                    <Button
+                      variant="outline"
+                      onClick={() => setIsCameraOpen(true)}
+                    >
+                      <Camera className="mr-2 h-4 w-4" /> Scan with Camera
+                    </Button>
+                    <div className="text-center text-sm text-muted-foreground">
+                      OR
+                    </div>
+                    <div>
+                      <Label htmlFor="qr-upload">Upload from file</Label>
+                      <Input
+                        ref={fileInputRef}
+                        id="qr-upload"
+                        type="file"
+                        accept="image/*"
+                        onChange={handleFileUpload}
+                        className="mt-2"
                       />
                     </div>
-                  </div>
-                )}
-                <div>
-                  <Label htmlFor="note">Note (optional)</Label>
-                  <Textarea
-                    id="note"
-                    value={note}
-                    onChange={(e) => setNote(e.target.value)}
-                    placeholder="Add a descriptive note..."
-                    className="mt-2"
-                  />
-                </div>
-                <Button
-                  onClick={handleAddSecretFromFile}
-                  disabled={!preview}
-                  className="w-full mt-2"
-                >
-                  <ImageIcon className="mr-2 h-4 w-4" /> Add from Image
-                </Button>
+                    <div
+                      ref={pasteRef}
+                      tabIndex={0}
+                      onPaste={handlePaste}
+                      className="border-2 border-dashed rounded-lg p-6 text-center text-muted-foreground cursor-pointer hover:border-primary focus:border-primary outline-none"
+                    >
+                      Click and press <b>Ctrl + V</b> to paste
+                    </div>
+                    {preview && (
+                      <div className="mt-2 space-y-2">
+                        <Label>Image Preview</Label>
+                        <div className="flex justify-center">
+                          <img
+                            src={preview}
+                            alt="QR preview"
+                            className="rounded-lg border max-h-40"
+                          />
+                        </div>
+                      </div>
+                    )}
+                    <div>
+                      <Label htmlFor="note-scan">Note (optional)</Label>
+                      <Textarea
+                        id="note-scan"
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                        placeholder="Add a descriptive note..."
+                        className="mt-2"
+                      />
+                    </div>
+                    <Button
+                      onClick={handleAddSecretFromFile}
+                      disabled={!preview}
+                      className="w-full mt-2"
+                    >
+                      <ImageIcon className="mr-2 h-4 w-4" /> Add from Image
+                    </Button>
+                  </TabsContent>
+                  <TabsContent value="manual" className="space-y-4 pt-4">
+                    <div>
+                      <Label htmlFor="manual-label">Label</Label>
+                      <Input
+                        id="manual-label"
+                        value={manualLabel}
+                        onChange={(e) => setManualLabel(e.target.value)}
+                        placeholder="e.g., Google: user@example.com"
+                        className="mt-2"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="manual-secret">Secret Key (Base32)</Label>
+                      <Textarea
+                        id="manual-secret"
+                        value={manualSecret}
+                        onChange={(e) => setManualSecret(e.target.value)}
+                        placeholder="Paste your Base32 secret here"
+                        className="mt-2"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="note-manual">Note (optional)</Label>
+                      <Textarea
+                        id="note-manual"
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                        placeholder="Add a descriptive note..."
+                        className="mt-2"
+                      />
+                    </div>
+                    <Button
+                      onClick={handleAddSecretManually}
+                      className="w-full"
+                    >
+                      <PlusCircle className="mr-2 h-4 w-4" /> Add Secret
+                      Manually
+                    </Button>
+                  </TabsContent>
+                  <TabsContent value="url" className="space-y-4 pt-4">
+                    <div>
+                      <Label htmlFor="direct-url">TOTP URL</Label>
+                      <Textarea
+                        id="direct-url"
+                        value={directUrl}
+                        onChange={(e) => setDirectUrl(e.target.value)}
+                        placeholder="otpauth://totp/..."
+                        className="mt-2"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="note-url">Note (optional)</Label>
+                      <Textarea
+                        id="note-url"
+                        value={note}
+                        onChange={(e) => setNote(e.target.value)}
+                        placeholder="Add a descriptive note..."
+                        className="mt-2"
+                      />
+                    </div>
+                    <Button onClick={handleAddSecretFromUrl} className="w-full">
+                      <Link className="mr-2 h-4 w-4" /> Add from URL
+                    </Button>
+                  </TabsContent>
+                </Tabs>
               </CardContent>
             </Card>
           </div>
