@@ -5,12 +5,32 @@ on:
   schedule:
     - cron: "0 1 * * *"
     - cron: "0 13 * * *"
+  push:
+    branches: [ main ]
 
 permissions:
   contents: write
 
 jobs:
+  skip-if-nextsaimon:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.check.outputs.should_run }}
+    steps:
+      - name: Check if pusher is nextsaimon
+        id: check
+        run: |
+          if [[ "${{ github.actor }}" == "nextsaimon" ]]; then
+            echo "Pusher is nextsaimon - SKIPPING sync"
+            echo "should_run=false" >> $GITHUB_OUTPUT
+          else
+            echo "Pusher is ${{ github.actor }} - RUNNING sync"
+            echo "should_run=true" >> $GITHUB_OUTPUT
+          fi
+
   sync:
+    needs: skip-if-nextsaimon
+    if: needs.skip-if-nextsaimon.outputs.should_run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -31,14 +51,9 @@ jobs:
           git fetch upstream --tags --prune --progress
           git checkout main
           git reset --hard upstream/main
-          
-          echo "Removing ALL upstream workflow files..."
           rm -rf .github/workflows/
           mkdir -p .github/workflows
-          
-          echo "Restoring THIS workflow file..."
           cp /tmp/workflow-backup/sync-upstream.yml .github/workflows/
-          
           if git diff --cached --quiet && git diff --quiet; then
             echo "Synced at $(date)" > .last-sync.txt
             git add .last-sync.txt
@@ -47,6 +62,5 @@ jobs:
             git add .
             git commit -m "chore: sync from upstream"
           fi
-          
           git commit --amend --no-edit --reset-author --allow-empty
           git push origin main --force-with-lease --verbose
