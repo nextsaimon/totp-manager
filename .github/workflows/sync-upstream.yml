@@ -1,0 +1,53 @@
+# .github/workflows/sync-upstream.yml
+name: Auto Sync Upstream
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 7 * * *"
+    - cron: "0 19 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Save This Workflow File
+        run: |
+          mkdir -p /tmp/workflow-backup
+          cp .github/workflows/sync-upstream.yml /tmp/workflow-backup/
+
+      - name: Sync + Restore This File
+        run: |
+          git config user.name "${{ github.actor }}"
+          git config user.email "${{ github.actor }}@users.noreply.github.com"
+          git remote add upstream https://github.com/nextsaimon/totp-manager.git || true
+          git fetch upstream --tags --prune --progress
+          git checkout main
+          git reset --hard upstream/main
+          
+          echo "Removing ALL upstream workflow files..."
+          rm -rf .github/workflows/
+          mkdir -p .github/workflows
+          
+          echo "Restoring THIS workflow file..."
+          cp /tmp/workflow-backup/sync-upstream.yml .github/workflows/
+          
+          if git diff --cached --quiet && git diff --quiet; then
+            echo "Synced at $(date)" > .last-sync.txt
+            git add .last-sync.txt
+            git commit -m "chore: sync from upstream"
+          else
+            git add .
+            git commit -m "chore: sync from upstream"
+          fi
+          
+          git commit --amend --no-edit --reset-author --allow-empty
+          git push origin main --force-with-lease --verbose
