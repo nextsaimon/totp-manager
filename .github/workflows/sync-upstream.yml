@@ -1,11 +1,10 @@
-# .github/workflows/sync-upstream.yml
 name: Auto Sync Upstream
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 7 * * *"
-    - cron: "0 19 * * *"
+    - cron: "0 1 * * *"
+    - cron: "0 13 * * *"
 
 permissions:
   contents: write
