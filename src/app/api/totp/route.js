@@ -52,12 +52,35 @@ export async function GET(req) {
   try {
     const db = await connectDB();
     const collection = db.collection("totp");
+    const { searchParams } = new URL(req.url);
+    const noteForId = searchParams.get("id");
+
+    if (noteForId) {
+      if (!ObjectId.isValid(noteForId)) {
+        return NextResponse.json(
+          { error: "Invalid ID provided" },
+          { status: 400 }
+        );
+      }
+      const secret = await collection.findOne(
+        { _id: new ObjectId(noteForId) },
+        { projection: { note: 1 } }
+      );
+      if (!secret) {
+        return NextResponse.json(
+          { error: "Secret not found" },
+          { status: 404 }
+        );
+      }
+      return NextResponse.json({ note: secret.note || "" });
+    }
+
     const all = await collection.find({}).sort({ updatedAt: -1 }).toArray();
-    const secretsWithoutKeys = all.map((item) => {
-      const { secret, ...rest } = item;
-      return rest;
+    const secretsSummary = all.map((item) => {
+      const { secret, note, ...rest } = item;
+      return { ...rest, hasNote: !!note && note.trim().length > 0 };
     });
-    return NextResponse.json(secretsWithoutKeys);
+    return NextResponse.json(secretsSummary);
   } catch (error) {
     return NextResponse.json(
       { error: "Internal Server Error" },
@@ -85,7 +108,6 @@ export async function POST(req) {
     let totpData = {};
 
     if (url) {
-      // Handle otpauth:// URL
       if (!url.startsWith("otpauth://")) {
         return NextResponse.json(
           { error: "Invalid otpauth:// URL provided" },
@@ -93,11 +115,9 @@ export async function POST(req) {
         );
       }
       try {
-        // Manually parse the URL to get the exact label from the path
         const urlObject = new URL(url);
         let pathLabel = decodeURIComponent(urlObject.pathname);
 
-        // Strip prefixes like '/totp/' or just '/' to get the raw label
         if (pathLabel.startsWith("/totp/")) {
           pathLabel = pathLabel.substring(6);
         } else if (pathLabel.startsWith("/")) {
@@ -111,11 +131,9 @@ export async function POST(req) {
           );
         }
 
-        // Use OTPAuth library to parse other parameters like the secret
         const totp = OTPAuth.URI.parse(url);
 
-        // Set data for database insertion
-        totpData.label = pathLabel; // Use the manually extracted label
+        totpData.label = pathLabel;
         totpData.secret = totp.secret.base32;
         totpData.issuer = totp.issuer || "Unknown Issuer";
       } catch (err) {
@@ -125,7 +143,6 @@ export async function POST(req) {
         );
       }
     } else if (manualLabel && manualSecret) {
-      // Handle manual entry of secret and label
       if (!manualLabel.trim()) {
         return NextResponse.json(
           { error: "Label cannot be empty" },
@@ -133,12 +150,10 @@ export async function POST(req) {
         );
       }
       try {
-        // Validate the secret key
         OTPAuth.Secret.fromBase32(manualSecret.trim().toUpperCase());
 
         totpData.label = manualLabel.trim();
         totpData.secret = manualSecret.trim().toUpperCase();
-        // Infer issuer from the label (part before the first colon)
         totpData.issuer = manualLabel.split(":")[0].trim() || "Unknown Issuer";
       } catch (err) {
         return NextResponse.json(
@@ -147,7 +162,6 @@ export async function POST(req) {
         );
       }
     } else {
-      // If neither condition is met, it's a bad request
       return NextResponse.json(
         {
           error:
@@ -157,7 +171,6 @@ export async function POST(req) {
       );
     }
 
-    // Common logic to save to the database
     await collection.updateOne(
       { label: totpData.label },
       {
@@ -165,7 +178,7 @@ export async function POST(req) {
           label: totpData.label,
           secret: totpData.secret,
           issuer: totpData.issuer,
-          note, // Save the note
+          note,
           updatedAt: new Date(),
         },
       },

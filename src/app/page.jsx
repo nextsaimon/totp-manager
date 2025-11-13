@@ -5,6 +5,7 @@ import * as OTPAuth from "otpauth";
 import { toast } from "sonner";
 import {
   Eye,
+  EyeOff,
   Copy,
   Trash2,
   Image as ImageIcon,
@@ -17,7 +18,7 @@ import {
   Search,
   PlusCircle,
   Link,
-  Loader2, // 1. Import the loader icon
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -69,7 +70,6 @@ export default function Home() {
   const [editingNoteContent, setEditingNoteContent] = useState("");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Input states for adding secrets
   const [manualLabel, setManualLabel] = useState("");
   const [manualSecret, setManualSecret] = useState("");
   const [directUrl, setDirectUrl] = useState("");
@@ -91,9 +91,11 @@ export default function Home() {
   const [otpTimeLeft, setOtpTimeLeft] = useState(0);
   const otpIntervalRef = useRef(null);
 
-  // 2. Add new state variables for loading
   const [togglingOtpId, setTogglingOtpId] = useState(null);
   const [copyingOtpId, setCopyingOtpId] = useState(null);
+
+  const [visibleNotes, setVisibleNotes] = useState({});
+  const [loadingNoteId, setLoadingNoteId] = useState(null);
 
   const videoRef = useRef(null);
   const processCanvasRef = useRef(null);
@@ -103,7 +105,7 @@ export default function Home() {
   const lastProcessRef = useRef(0);
   const pasteRef = useRef(null);
   const fileInputRef = useRef(null);
-  const SCAN_INTERVAL_MS = 66; // ~15 FPS processing
+  const SCAN_INTERVAL_MS = 66;
 
   const autoLogoutTimerRef = useRef(null);
   const AUTO_LOGOUT_MINUTES = parseInt(
@@ -120,6 +122,7 @@ export default function Home() {
     setEditingTargetId(null);
     setPreview(null);
     setSearchQuery("");
+    setVisibleNotes({});
     toast.info("Logged out due to inactivity.");
   }, []);
 
@@ -229,7 +232,6 @@ export default function Home() {
     toast.success("Temporary code copied to clipboard!");
   };
 
-  // 3. Update toggleOtp function
   const toggleOtp = async (id) => {
     clearInterval(otpIntervalRef.current);
 
@@ -239,7 +241,11 @@ export default function Home() {
       return;
     }
 
-    setTogglingOtpId(id); // Set loading state
+    setVisibleNotes({});
+    setEditingTargetId(null);
+    setEditingNoteContent("");
+
+    setTogglingOtpId(id);
     try {
       const res = await fetch("/api/totp/generate", {
         method: "POST",
@@ -265,7 +271,7 @@ export default function Home() {
       setVisibleOtp({ id: null, token: "••• •••" });
       setOtpTimeLeft(0);
     } finally {
-      setTogglingOtpId(null); // Clear loading state
+      setTogglingOtpId(null);
     }
   };
 
@@ -424,7 +430,6 @@ export default function Home() {
     await fetchSecrets(passwordInput);
   };
 
-  // Generic function to submit TOTP data
   const submitOtpData = async (payload) => {
     try {
       const res = await fetch("/api/totp", {
@@ -511,16 +516,16 @@ export default function Home() {
       });
       if (!res.ok) throw new Error("Failed to update note.");
       toast.success("Note Updated");
-      handleCancelEdit();
+      setVisibleNotes({ [id]: editingNoteContent });
       await fetchSecrets(passwordInput);
+      handleCancelEdit();
     } catch (error) {
       toast.error("Error", { description: error.message });
     }
   };
 
-  // 3. Update copyOtp function
   const copyOtp = async (id) => {
-    setCopyingOtpId(id); // Set loading state
+    setCopyingOtpId(id);
     try {
       const res = await fetch("/api/totp/generate", {
         method: "POST",
@@ -536,13 +541,67 @@ export default function Home() {
     } catch (error) {
       toast.error("Error", { description: error.message });
     } finally {
-      setCopyingOtpId(null); // Clear loading state
+      setCopyingOtpId(null);
     }
   };
 
-  const handleEditClick = (secret) => {
-    setEditingTargetId(secret._id);
-    setEditingNoteContent(secret.note || "");
+  const handleToggleNoteVisibility = async (id) => {
+    if (visibleNotes.hasOwnProperty(id)) {
+      setVisibleNotes({});
+      return;
+    }
+
+    setVisibleOtp({ id: null, token: "••• •••" });
+    setOtpTimeLeft(0);
+    clearInterval(otpIntervalRef.current);
+    setEditingTargetId(null);
+    setEditingNoteContent("");
+
+    setLoadingNoteId(id);
+    try {
+      const res = await fetch(`/api/totp?id=${id}`, {
+        headers: getAuthHeaders(),
+      });
+      if (!res.ok) throw new Error("Failed to fetch note.");
+      const { note } = await res.json();
+      setVisibleNotes({ [id]: note });
+    } catch (error) {
+      toast.error("Error", { description: error.message });
+      setVisibleNotes({});
+    } finally {
+      setLoadingNoteId(null);
+    }
+  };
+
+  const handleEditClick = async (secret) => {
+    const id = secret._id;
+
+    if (editingTargetId === id) return;
+
+    setVisibleOtp({ id: null, token: "••• •••" });
+    setOtpTimeLeft(0);
+    clearInterval(otpIntervalRef.current);
+    setVisibleNotes({});
+
+    if (secret.hasNote) {
+      setLoadingNoteId(id);
+      try {
+        const res = await fetch(`/api/totp?id=${id}`, {
+          headers: getAuthHeaders(),
+        });
+        if (!res.ok) throw new Error("Failed to fetch note for editing.");
+        const { note } = await res.json();
+        setEditingNoteContent(note || "");
+      } catch (error) {
+        toast.error("Error", { description: error.message });
+        setEditingNoteContent("");
+      } finally {
+        setLoadingNoteId(null);
+      }
+    } else {
+      setEditingNoteContent("");
+    }
+    setEditingTargetId(id);
   };
 
   const handleCancelEdit = () => {
@@ -583,7 +642,10 @@ export default function Home() {
   const filteredSecrets = secrets.filter(
     (item) =>
       item.label.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      item.note?.toLowerCase().includes(searchQuery.toLowerCase())
+      (visibleNotes[item._id] &&
+        visibleNotes[item._id]
+          .toLowerCase()
+          .includes(searchQuery.toLowerCase()))
   );
 
   const SecretCardSkeleton = () => (
@@ -827,7 +889,7 @@ export default function Home() {
                   <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
                     type="search"
-                    placeholder="Search by label or note..."
+                    placeholder="Search by label or visible note..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="pl-9"
@@ -870,20 +932,61 @@ export default function Home() {
                               </div>
                             ) : (
                               <div className="flex items-start justify-between gap-2 group">
-                                <CardDescription
-                                  className="whitespace-pre-wrap grow"
-                                  title={item.note}
-                                >
-                                  {item.note || "No note"}
-                                </CardDescription>
-                                <Button
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                                  onClick={() => handleEditClick(item)}
-                                >
-                                  <Pencil className="h-3 w-3" />
-                                </Button>
+                                <div className="grow pr-2 min-w-0">
+                                  {visibleNotes.hasOwnProperty(item._id) ? (
+                                    <CardDescription
+                                      className="whitespace-pre-wrap break-words"
+                                      title={visibleNotes[item._id]}
+                                    >
+                                      {visibleNotes[item._id] || (
+                                        <span className="italic text-muted-foreground">
+                                          Empty Note
+                                        </span>
+                                      )}
+                                    </CardDescription>
+                                  ) : (
+                                    <CardDescription className="italic text-muted-foreground">
+                                      {item.hasNote ? "Note hidden" : "No note"}
+                                    </CardDescription>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center shrink-0">
+                                  {item.hasNote && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6"
+                                      onClick={() =>
+                                        handleToggleNoteVisibility(item._id)
+                                      }
+                                      disabled={loadingNoteId === item._id}
+                                      title={
+                                        visibleNotes.hasOwnProperty(item._id)
+                                          ? "Hide note"
+                                          : "Show note"
+                                      }
+                                    >
+                                      {loadingNoteId === item._id ? (
+                                        <Loader2 className="h-3 w-3 animate-spin" />
+                                      ) : visibleNotes.hasOwnProperty(
+                                          item._id
+                                        ) ? (
+                                        <EyeOff className="h-3 w-3" />
+                                      ) : (
+                                        <Eye className="h-3 w-3" />
+                                      )}
+                                    </Button>
+                                  )}
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                                    onClick={() => handleEditClick(item)}
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </Button>
+                                </div>
                               </div>
                             )}
                           </div>
@@ -904,7 +1007,6 @@ export default function Home() {
                                   ? visibleOtp.token
                                   : "••• •••"}
                               </span>
-                              {/* 4. Update the buttons with loading logic */}
                               <div className="flex gap-1">
                                 <Button
                                   variant="ghost"
