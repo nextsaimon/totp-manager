@@ -17,6 +17,7 @@ import {
   Search,
   PlusCircle,
   Link,
+  Loader2, // 1. Import the loader icon
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -89,6 +90,10 @@ export default function Home() {
   const [visibleOtp, setVisibleOtp] = useState({ id: null, token: "••• •••" });
   const [otpTimeLeft, setOtpTimeLeft] = useState(0);
   const otpIntervalRef = useRef(null);
+
+  // 2. Add new state variables for loading
+  const [togglingOtpId, setTogglingOtpId] = useState(null);
+  const [copyingOtpId, setCopyingOtpId] = useState(null);
 
   const videoRef = useRef(null);
   const processCanvasRef = useRef(null);
@@ -224,6 +229,7 @@ export default function Home() {
     toast.success("Temporary code copied to clipboard!");
   };
 
+  // 3. Update toggleOtp function
   const toggleOtp = async (id) => {
     clearInterval(otpIntervalRef.current);
 
@@ -233,6 +239,7 @@ export default function Home() {
       return;
     }
 
+    setTogglingOtpId(id); // Set loading state
     try {
       const res = await fetch("/api/totp/generate", {
         method: "POST",
@@ -257,6 +264,8 @@ export default function Home() {
       toast.error("Error", { description: error.message });
       setVisibleOtp({ id: null, token: "••• •••" });
       setOtpTimeLeft(0);
+    } finally {
+      setTogglingOtpId(null); // Clear loading state
     }
   };
 
@@ -509,7 +518,9 @@ export default function Home() {
     }
   };
 
+  // 3. Update copyOtp function
   const copyOtp = async (id) => {
+    setCopyingOtpId(id); // Set loading state
     try {
       const res = await fetch("/api/totp/generate", {
         method: "POST",
@@ -524,6 +535,8 @@ export default function Home() {
       setTimeout(() => setIsCopied(null), 2000);
     } catch (error) {
       toast.error("Error", { description: error.message });
+    } finally {
+      setCopyingOtpId(null); // Clear loading state
     }
   };
 
@@ -891,21 +904,36 @@ export default function Home() {
                                   ? visibleOtp.token
                                   : "••• •••"}
                               </span>
+                              {/* 4. Update the buttons with loading logic */}
                               <div className="flex gap-1">
                                 <Button
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => toggleOtp(item._id)}
+                                  disabled={
+                                    togglingOtpId === item._id ||
+                                    copyingOtpId === item._id
+                                  }
                                 >
-                                  <Eye className="h-5 w-5" />
+                                  {togglingOtpId === item._id ? (
+                                    <Loader2 className="h-5 w-5 animate-spin" />
+                                  ) : (
+                                    <Eye className="h-5 w-5" />
+                                  )}
                                 </Button>
                                 <Button
                                   variant="ghost"
                                   size="icon"
                                   onClick={() => copyOtp(item._id)}
+                                  disabled={
+                                    togglingOtpId === item._id ||
+                                    copyingOtpId === item._id
+                                  }
                                 >
                                   {isCopied === item._id ? (
                                     <Check className="h-5 w-5 text-green-500" />
+                                  ) : copyingOtpId === item._id ? (
+                                    <Loader2 className="h-5 w-5 animate-spin" />
                                   ) : (
                                     <Copy className="h-5 w-5" />
                                   )}
