@@ -935,7 +935,7 @@ export default function Home() {
                                 <div className="grow pr-2 min-w-0">
                                   {visibleNotes.hasOwnProperty(item._id) ? (
                                     <CardDescription
-                                      className="whitespace-pre-wrap break-words"
+                                      className="whitespace-pre-wrap"
                                       title={visibleNotes[item._id]}
                                     >
                                       {visibleNotes[item._id] || (
