@@ -80,7 +80,11 @@ export async function GET(req) {
       const { secret, note, ...rest } = item;
       return { ...rest, hasNote: !!note && note.trim().length > 0 };
     });
-    return NextResponse.json(secretsSummary);
+    return NextResponse.json(secretsSummary, {
+      headers: {
+        "Cache-Control": "no-store, max-age=0",
+      },
+    });
   } catch (error) {
     return NextResponse.json(
       { error: "Internal Server Error" },

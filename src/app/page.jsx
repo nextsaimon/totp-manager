@@ -401,6 +401,7 @@ export default function Home() {
     try {
       const res = await fetch("/api/totp", {
         headers: { "X-App-Password": password },
+        cache: "no-store",
       });
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
@@ -1064,8 +1065,8 @@ export default function Home() {
                       No Matching Secrets
                     </h3>
                     <p>
-                      Your search for "{searchQuery}" did not return any
-                      results.
+                      Your search for &quot;{searchQuery}&quot; did not return
+                      any results.
                     </p>
                   </div>
                 )}
