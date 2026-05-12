@@ -1,7 +1,6 @@
 "use client";
 import { useState, useRef, useEffect, useCallback } from "react";
 import jsQR from "jsqr";
-import * as OTPAuth from "otpauth";
 import { toast } from "sonner";
 import {
   Eye,
@@ -199,31 +198,42 @@ export default function Home() {
     }
   }, [isTempGeneratorOpen]);
 
-  const handleGenerateTempCode = () => {
+  const handleGenerateTempCode = async () => {
     clearInterval(tempIntervalRef.current);
     if (!tempSecret.trim()) {
       setTempError("Secret cannot be empty.");
       setTempOtp(null);
       return;
     }
-    try {
-      const totp = new OTPAuth.TOTP({
-        secret: OTPAuth.Secret.fromBase32(tempSecret.trim().toUpperCase()),
-      });
-      const updateToken = () => {
-        const token = totp.generate();
+
+    const updateToken = async () => {
+      try {
+        const res = await fetch("/api/totp/generate", {
+          method: "POST",
+          headers: getAuthHeaders(),
+          body: JSON.stringify({ secret: tempSecret.trim().toUpperCase() }),
+        });
+
+        if (!res.ok) {
+          const data = await res.json();
+          throw new Error(data.error || "Failed to generate token.");
+        }
+
+        const { token } = await res.json();
         const timeLeft = 30 - (Math.floor(Date.now() / 1000) % 30);
         setTempOtp(token);
         setTempTimeLeft(timeLeft);
         setTempError(null);
-      };
-      updateToken();
-      tempIntervalRef.current = setInterval(updateToken, 1000);
-    } catch (e) {
-      setTempError("Invalid Base32 secret key provided.");
-      setTempOtp(null);
-      setTempTimeLeft(0);
-    }
+      } catch (err) {
+        setTempError(err.message);
+        setTempOtp(null);
+        setTempTimeLeft(0);
+        clearInterval(tempIntervalRef.current);
+      }
+    };
+
+    await updateToken();
+    tempIntervalRef.current = setInterval(updateToken, 1000);
   };
 
   const copyTempOtp = () => {

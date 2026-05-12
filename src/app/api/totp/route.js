@@ -2,52 +2,11 @@ import { connectDB } from "@/lib/db";
 import { NextResponse } from "next/server";
 import { ObjectId } from "mongodb";
 import * as OTPAuth from "otpauth";
-
-const loginAttempts = new Map();
-const MAX_ATTEMPTS = parseInt(process.env.MAX_LOGIN_ATTEMPTS, 10) || 5;
-const LOCKOUT_DURATION =
-  (parseInt(process.env.LOGIN_LOCKOUT_MINUTES, 10) || 15) * 60 * 1000;
-
-function getIp(req) {
-  return req.headers.get("x-forwarded-for") || "127.0.0.1";
-}
-
-function isAuthorized(req) {
-  const password = req.headers.get("X-App-Password");
-  return password === process.env.APP_PASSWORD;
-}
+import { validateRequest } from "@/lib/auth";
 
 export async function GET(req) {
-  const ip = getIp(req);
-  const attemptInfo = loginAttempts.get(ip);
-
-  if (
-    attemptInfo &&
-    attemptInfo.lockUntil &&
-    attemptInfo.lockUntil > Date.now()
-  ) {
-    const remainingSeconds = Math.ceil(
-      (attemptInfo.lockUntil - Date.now()) / 1000
-    );
-    return NextResponse.json(
-      {
-        error: `Too many failed attempts. Try again in ${remainingSeconds} seconds.`,
-      },
-      { status: 429 }
-    );
-  }
-
-  if (!isAuthorized(req)) {
-    const newAttemptCount = (attemptInfo?.count || 0) + 1;
-    let newLockUntil = null;
-    if (newAttemptCount >= MAX_ATTEMPTS) {
-      newLockUntil = Date.now() + LOCKOUT_DURATION;
-    }
-    loginAttempts.set(ip, { count: newAttemptCount, lockUntil: newLockUntil });
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  loginAttempts.delete(ip);
+  const authError = await validateRequest(req);
+  if (authError) return authError;
 
   try {
     const db = await connectDB();
@@ -75,17 +34,24 @@ export async function GET(req) {
       return NextResponse.json({ note: secret.note || "" });
     }
 
-    const all = await collection.find({}).sort({ updatedAt: -1 }).toArray();
+    // Use projection to explicitly exclude the secret field
+    const all = await collection
+      .find({}, { projection: { secret: 0 } })
+      .sort({ updatedAt: -1 })
+      .toArray();
+
     const secretsSummary = all.map((item) => {
-      const { secret, note, ...rest } = item;
+      const { note, ...rest } = item;
       return { ...rest, hasNote: !!note && note.trim().length > 0 };
     });
+
     return NextResponse.json(secretsSummary, {
       headers: {
         "Cache-Control": "no-store, max-age=0",
       },
     });
   } catch (error) {
+    console.error("GET /api/totp error:", error);
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 }
@@ -94,9 +60,8 @@ export async function GET(req) {
 }
 
 export async function POST(req) {
-  if (!isAuthorized(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authError = await validateRequest(req);
+  if (authError) return authError;
 
   const db = await connectDB();
   const collection = db.collection(process.env.COLLECTION_NAME || "totp");
@@ -191,6 +156,7 @@ export async function POST(req) {
 
     return NextResponse.json({ success: true, label: totpData.label });
   } catch (error) {
+    console.error("POST /api/totp error:", error);
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 }
@@ -199,12 +165,12 @@ export async function POST(req) {
 }
 
 export async function DELETE(req) {
-  if (!isAuthorized(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authError = await validateRequest(req);
+  if (authError) return authError;
+
   try {
     const db = await connectDB();
-    const collection = db.collection("totp");
+    const collection = db.collection(process.env.COLLECTION_NAME || "totp");
     const { id, label } = await req.json();
     if (!id || !ObjectId.isValid(id)) {
       return NextResponse.json(
@@ -231,6 +197,7 @@ export async function DELETE(req) {
     await collection.deleteOne({ _id: new ObjectId(id) });
     return NextResponse.json({ success: true });
   } catch (error) {
+    console.error("DELETE /api/totp error:", error);
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 }
@@ -239,12 +206,12 @@ export async function DELETE(req) {
 }
 
 export async function PUT(req) {
-  if (!isAuthorized(req)) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+  const authError = await validateRequest(req);
+  if (authError) return authError;
+
   try {
     const db = await connectDB();
-    const collection = db.collection("totp");
+    const collection = db.collection(process.env.COLLECTION_NAME || "totp");
     const { id, note } = await req.json();
 
     if (!id || !ObjectId.isValid(id)) {
@@ -265,6 +232,7 @@ export async function PUT(req) {
 
     return NextResponse.json({ success: true });
   } catch (error) {
+    console.error("PUT /api/totp error:", error);
     return NextResponse.json(
       { error: "Internal Server Error" },
       { status: 500 }
