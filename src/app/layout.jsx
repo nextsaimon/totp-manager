@@ -5,7 +5,6 @@ import { ThemeProvider } from "@/components/theme-provider";
 export const metadata = {
   title: "TOTP Secret Manager",
   description: "A simple manager for your TOTP secrets.",
-  manifest: "/manifest.webmanifest",
   appleWebApp: {
     capable: true,
     statusBarStyle: "default",
@@ -14,6 +13,10 @@ export const metadata = {
   formatDetection: {
     telephone: false,
   },
+};
+
+export const viewport = {
+  themeColor: "#000000",
 };
 
 export default function RootLayout({ children }) {
